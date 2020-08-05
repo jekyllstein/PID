@@ -61,25 +61,25 @@ function runcontrolloop(kp, ki, kd, dt, setpoint, datachannel, controlchannel, s
     tsteps = 0
     #calculates the difference between the setpoint and the process variable (pv)
     calcerror(pv) = setpoint - pv
-    while empty(stopchannel)
-        #If during the first 3 iterations fill in e0, e1, e2 and start accumulating integral.  After that point shift the values backwards replacing e0 with the current measurement
-        if tsteps == 0
-            e2 = calcerror(take!(datachannel))
-        elseif tsteps == 1
-            e1 = calcerror(take!(datachannel))
-            i = updateintegral(0.0, e1, e2, dt)
-        elseif tsteps >= 2
-        #after 3 steps we have all the information to start outputing control values but past the 3rd step we have to shift back the error values to make room to add a new e0
-            if tsteps > 2
-                e2 = e1
-                e1 = e0
-            end
-            e0 = calcerror(take!(datachannel))
-            i = updateintegral(i, e0, e1, dt) 
-            d = updatederivative(e0, e1, d2, dt)
-            output = pidcontrol(e0, i, d, kp, ki, kd)
-            push!(controlchannel, output)
-        end
+    #If during the first 3 measurements fill in e0, e1, e2 and start accumulating integral.  After that point shift the values backwards replacing e0 with the current measurement
+    # e2 = take!(datachannel)
+    e2 = calcerror(take!(datachannel))
+    e1 = calcerror(take!(datachannel))
+    i = updateintegral(0.0, e1, e2, dt)
+    e0 = calcerror(take!(datachannel))
+    i = updateintegral(i, e0, e1, dt) 
+    d = updatederivative(e0, e1, e2, dt)
+    output = pidcontrol(e0, i, d, kp, ki, kd)
+    push!(controlchannel, output)
+    while !isready(stopchannel)
+        #after 3 measurements we have all the information to start outputing control values but past the 3rd step we have to shift back the error values to make room to add a new e0
+        e2 = e1
+        e1 = e0
+        e0 = calcerror(take!(datachannel))
+        i = updateintegral(i, e0, e1, dt) 
+        d = updatederivative(e0, e1, e2, dt)
+        output = pidcontrol(e0, i, d, kp, ki, kd)
+        push!(controlchannel, output)
     end
 end
 
