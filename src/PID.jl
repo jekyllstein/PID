@@ -27,22 +27,29 @@ updatederivative(e0::T, e1::T, e2::T, dt::T) where T <: AbstractFloat = (T(1.5)*
     
 
 """
-Calculates pid controller output for the current error value e0 based on the user defined coefficients kp, ki, kd.
-Requires the most recent 3 error values as well as the previous integral value and the time spacing between measurements.
-The controller with clamp the output value between the min and max values for the controller which is 0 to 1 by default.  
-In most cases this will correspond to the minimum and maximum power available to apply to the control system.
+Calculates pid controller output for the current error value e, integral value i, and derivative value d as well as the user defined coefficients 
+kp, ki, kd, and the proportional band pb.  The controller with clamp the output value between the min and max values for the controller which is 
+0 to 1 by default.  In most cases this will correspond to the minimum and maximum power available to apply to the control system.
 
 All input arguments should be a subtype of AbstractFloat
 
-`output = pidcontrol(e0, e1, e2, i1, kp, ki, kd, dt)`
+`output = pidcontrol(e, i, d, kp, ki, kd, pb)`
 """
-pidcontrol(e::T, i::T, d::T, kp::T, ki::T, kd::T; maxoutput=1.0, minoutput=0.0) where T <: AbstractFloat = clamp(kp*e + ki*i + kd*d, minoutput, maxoutput)
+function pidcontrol(e::T, i::T, d::T, kp::T, ki::T, kd::T, pb::T; maxoutput=1.0, minoutput=0.0) where T <: AbstractFloat
+    if e >= pb
+        maxoutput
+    elseif e <= -pb 
+        minoutput
+    else
+        clamp(kp*e + ki*i + kd*d, minoutput, maxoutput)
+    end
+end
 
 """
 This function is a mockup of a control loop where datachannel represents some place where the controller can get the most recent measured value.
-controlchannel represents a place where the controller outputs its desired value.  kp, ki, kd are the user defined constants that regulate the behavior
-of the control system.  dt is the fixed time between measurements that appear in datachannel.  setpoint is the desired value for the system to reach.
-stopchannel represents a way to halt the control loop if something is placed in the channel.
+controlchannel represents a place where the controller outputs its desired value.  kp, ki, kd, and pb are the user defined constants that regulate 
+the behavior of the control system.  dt is the fixed time between measurements that appear in datachannel.  setpoint is the desired value for the system 
+to reach. stopchannel represents a way to halt the control loop if something is placed in the channel.
 
 E.g. 
 setpoint = 100 degrees C
@@ -57,7 +64,7 @@ Also note that this control loop only measures one input and controls one output
 power to a heating element and a fan.  If the setpoint is lowered one approach would be to stop the pid loop, run the fans at full power until the temperature hits the new setpoint,
 and then start a new pid control loop at the new setpoint.
 """
-function runcontrolloop(kp, ki, kd, dt, setpoint, datachannel, controlchannel, stopchannel)
+function runcontrolloop(kp, ki, kd, pb, dt, setpoint, datachannel, controlchannel, stopchannel)
     tsteps = 0
     #calculates the difference between the setpoint and the process variable (pv)
     calcerror(pv) = setpoint - pv
@@ -65,20 +72,20 @@ function runcontrolloop(kp, ki, kd, dt, setpoint, datachannel, controlchannel, s
     # e2 = take!(datachannel)
     e2 = calcerror(take!(datachannel))
     e1 = calcerror(take!(datachannel))
-    i = updateintegral(0.0, e1, e2, dt)
+    i = (abs(e1) >= pb) ? 0.0 : updateintegral(0.0, e1, e2, dt)
     e0 = calcerror(take!(datachannel))
-    i = updateintegral(i, e0, e1, dt) 
-    d = updatederivative(e0, e1, e2, dt)
-    output = pidcontrol(e0, i, d, kp, ki, kd)
+    i = (abs(e0) >= pb) ? 0.0 : updateintegral(i, e0, e1, dt) 
+    d = (abs(e0) >= pb) ? 0.0 : updatederivative(e0, e1, e2, dt)
+    output = pidcontrol(e0, i, d, kp, ki, kd, pb)
     push!(controlchannel, output)
     while !isready(stopchannel)
         #after 3 measurements we have all the information to start outputing control values but past the 3rd step we have to shift back the error values to make room to add a new e0
         e2 = e1
         e1 = e0
         e0 = calcerror(take!(datachannel))
-        i = updateintegral(i, e0, e1, dt) 
-        d = updatederivative(e0, e1, e2, dt)
-        output = pidcontrol(e0, i, d, kp, ki, kd)
+        i = (abs(e0) >= pb) ? 0.0 : updateintegral(i, e0, e1, dt) 
+        d = (abs(e0) >= pb) ? 0.0 : updatederivative(e0, e1, e2, dt)
+        output = pidcontrol(e0, i, d, kp, ki, kd, pb)
         push!(controlchannel, output)
     end
 end

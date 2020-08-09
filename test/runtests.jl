@@ -21,10 +21,11 @@ for i in eachindex(t)
 end
 
 @assert sum(a -> a^2, dy[3:end] .- numderiv[3:end])/(length(t)-3) < dt^2 
+println("Derivative test passed")
 @assert sum(a -> a^2, iy .- numint)/(length(t)-3) < dt^2 
+println("Integration test passed")
 
-
-function simulateheating(;setpoint=90.0, maxpower=120.0, kp=0.1, ki=0.0, kd=0.0, steps=10000)
+function simulateheating(;setpoint=90.0, pb = 10.0, maxpower=120.0, kp=0.1, ki=0.0, kd=0.0, steps=10000)
     M = 0.2
     Cp = 800
     kt = 1
@@ -40,7 +41,7 @@ function simulateheating(;setpoint=90.0, maxpower=120.0, kp=0.1, ki=0.0, kd=0.0,
     stopchannel = Channel{Bool}(1)
 
     # PID.runcontrolloop(kp, ki, kd, dt, setpoint, datachannel, controlchannel, stopchannel)
-    @async PID.runcontrolloop(kp, ki, kd, dt, setpoint, datachannel, controlchannel, stopchannel)
+    @async PID.runcontrolloop(kp, ki, kd, pb, dt, setpoint, datachannel, controlchannel, stopchannel)
 
     T = 0 #T is the offset from ambient temperature
     temps = Vector{Float64}()
@@ -72,10 +73,34 @@ function simulateheating(;setpoint=90.0, maxpower=120.0, kp=0.1, ki=0.0, kd=0.0,
     return temps, powers
 end
 
-results = [simulateheating(setpoint = 80, maxpower=120, kp = 0.2, ki = ki, steps = 100000) for ki in (0.00005, 0.0001, 0.000115, 0.0002, 0.0004, 0.0008, 0.0016)]
-p1 = plot(mapreduce(a -> a[1], hcat, results))
-p2 = plot(mapreduce(a -> a[2], hcat, results))
-plot(p1, p2, layout = 2)
+numsteps = 25000
+maket(numsteps) = dt .*(0:numsteps) 
+zoomind = 17550:17600
 
-# steps = 100000
-# plot((1:steps).*0.01, simulateheating(p = 100, steps = steps)[2:end])
+#example with infinitely narrow proportional band, corresponds to a system that is either on or off
+result1 = simulateheating(setpoint=80, maxpower=120, kp=1.0, pb=0.0, steps = numsteps)
+p1 = plot(maket(numsteps), result1[1], legend=false, xaxis = "time", yaxis = "temperature")
+p2 = plot(maket(numsteps)[2:end], result1[2], legend=false, xaxis="time", yaxis="power")
+p3 = plot(maket(numsteps)[zoomind], result1[1][zoomind], legend=false, xaxis="time", yaxis="temperature")
+p4 = plot(maket(numsteps)[zoomind], result1[2][zoomind], legend=false, xaxis="time", yaxis="power")
+p = plot(p1, p2, p3, p4, layout=4)
+savefig(p, "0degreeband.png")
+
+#example with a proportional band of 10 degrees so power varies smoothly from 
+#maximum at 10 degrees too low until 0 at the setpoint
+result2 = simulateheating(setpoint=80, maxpower=120, kp=0.1, pb=10.0, steps = numsteps)
+p1 = plot(maket(numsteps), result2[1], legend=false, xaxis = "time", yaxis = "temperature")
+p2 = plot(maket(numsteps)[2:end], result2[2], legend=false, xaxis="time", yaxis="power")
+p = plot(p1, p2, layout=2)
+savefig(p, "10degreeband.png")
+
+#10 degree band but with an integral constant as well to correct for a system
+#remaining stable below the setpoint
+numsteps = 100000
+for ki = (0.0, 0.001, 0.002, 0.004, 0.01, 0.1, 1.0)
+    result3 = simulateheating(setpoint=80, maxpower=120, kp=0.1, pb=10.0, ki=ki, steps = numsteps)
+    p1 = plot(maket(numsteps), result3[1], legend=false, xaxis = "time", yaxis = "temperature")
+    p2 = plot(maket(numsteps)[2:end], result3[2], legend=false, xaxis="time", yaxis="power")
+    p = plot(p1, p2, layout=2)
+    savefig(p, "10degreeband_ki=$ki.png")
+end
